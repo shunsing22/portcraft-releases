@@ -5,43 +5,42 @@ APP_NAME="portcraft"
 RELEASES_REPO="https://raw.githubusercontent.com/shunsing22/portcraft-releases/main"
 DEFAULT_DIR="/opt/portcraft"
 
-# When piped via curl|bash, stdout/stdin may not be a terminal.
-# Use /dev/tty for all interactive I/O so prompts are visible and input works.
-say() { echo "$@" >/dev/tty 2>/dev/null || echo "$@"; }
-ask() { read -rp "$1" "$2" </dev/tty 2>/dev/null || eval "$2=''"; }
+# When piped via curl|bash, stdin is consumed by the pipe.
+# Only read needs /dev/tty — echo/printf output works normally.
 
-say ""
-say "  PortCraft Installer"
-say "  ==================="
-say ""
+echo ""
+echo "  PortCraft Installer"
+echo "  ==================="
+echo ""
 
 # Check Docker
 if ! command -v docker &>/dev/null; then
-  say "ERROR: Docker is not installed. Install Docker first:"
-  say "  https://docs.docker.com/engine/install/"
+  echo "ERROR: Docker is not installed. Install Docker first:"
+  echo "  https://docs.docker.com/engine/install/"
   exit 1
 fi
 
 if ! docker compose version &>/dev/null; then
-  say "ERROR: Docker Compose plugin not found."
-  say "  Install it via: https://docs.docker.com/compose/install/"
+  echo "ERROR: Docker Compose plugin not found."
+  echo "  Install it via: https://docs.docker.com/compose/install/"
   exit 1
 fi
 
 # Install directory
-ask "Install directory [$DEFAULT_DIR]: " INSTALL_DIR
+printf "Install directory [%s]: " "$DEFAULT_DIR"
+read -r INSTALL_DIR </dev/tty 2>/dev/null || INSTALL_DIR=""
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_DIR}"
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 mkdir -p certs
 
-say "Downloading docker-compose.yml..."
+echo "Downloading docker-compose.yml..."
 curl -fsSL "$RELEASES_REPO/docker-compose.yml" -o docker-compose.yml
 
 # Generate .env if it doesn't exist
 if [ ! -f .env ]; then
-  say "Generating .env with random secrets..."
+  echo "Generating .env with random secrets..."
   POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
   SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=' | head -c 48)
 
@@ -54,22 +53,22 @@ SECRET_KEY=$SECRET_KEY
 HTTP_PORT=80
 ENVEOF
 
-  say ".env created with random secrets."
+  echo ".env created with random secrets."
 else
-  say ".env already exists — keeping existing configuration."
+  echo ".env already exists — keeping existing configuration."
 fi
 
-say "Pulling Docker images..."
+echo "Pulling Docker images..."
 docker compose pull
 
-say "Starting PortCraft..."
+echo "Starting PortCraft..."
 docker compose up -d
 
-say ""
-say "PortCraft is running!"
-say "  Open http://localhost in your browser to complete setup."
-say ""
-say "  Install directory: $INSTALL_DIR"
-say "  To stop:   cd $INSTALL_DIR && docker compose down"
-say "  To update: cd $INSTALL_DIR && docker compose pull && docker compose up -d"
-say ""
+echo ""
+echo "PortCraft is running!"
+echo "  Open http://localhost in your browser to complete setup."
+echo ""
+echo "  Install directory: $INSTALL_DIR"
+echo "  To stop:   cd $INSTALL_DIR && docker compose down"
+echo "  To update: cd $INSTALL_DIR && docker compose pull && docker compose up -d"
+echo ""
