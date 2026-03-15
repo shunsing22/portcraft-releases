@@ -29,9 +29,10 @@ INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_DIR}"
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
+mkdir -p certs
 
-echo "Downloading docker-compose.prod.yml..."
-curl -fsSL "$RELEASES_REPO/docker-compose.prod.yml" -o docker-compose.yml
+echo "Downloading docker-compose.yml..."
+curl -fsSL "$RELEASES_REPO/docker-compose.yml" -o docker-compose.yml
 
 # Generate .env if it doesn't exist
 if [ ! -f .env ]; then

@@ -32,9 +32,10 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = $DefaultDir }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Set-Location $InstallDir
+New-Item -ItemType Directory -Force -Path "certs" | Out-Null
 
-Write-Host "Downloading docker-compose.prod.yml..."
-Invoke-WebRequest -Uri "$ReleasesRepo/docker-compose.prod.yml" -OutFile "docker-compose.yml" -UseBasicParsing
+Write-Host "Downloading docker-compose.yml..."
+Invoke-WebRequest -Uri "$ReleasesRepo/docker-compose.yml" -OutFile "docker-compose.yml" -UseBasicParsing
 
 # Generate .env if it doesn't exist
 if (-not (Test-Path ".env")) {
