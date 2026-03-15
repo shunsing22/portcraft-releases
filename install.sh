@@ -24,7 +24,12 @@ if ! docker compose version &>/dev/null; then
 fi
 
 # Install directory
-read -rp "Install directory [$DEFAULT_DIR]: " INSTALL_DIR
+# When piped via curl|bash, stdin is the script — read from /dev/tty instead
+if [ -t 0 ]; then
+  read -rp "Install directory [$DEFAULT_DIR]: " INSTALL_DIR
+else
+  read -rp "Install directory [$DEFAULT_DIR]: " INSTALL_DIR </dev/tty 2>/dev/null || INSTALL_DIR=""
+fi
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_DIR}"
 
 mkdir -p "$INSTALL_DIR"
