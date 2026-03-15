@@ -4,16 +4,24 @@ set -euo pipefail
 APP_NAME="portcraft"
 RELEASES_REPO="https://raw.githubusercontent.com/shunsing22/portcraft-releases/main"
 DEFAULT_DIR="/opt/portcraft"
+DEFAULT_HTTP_PORT=80
+DEFAULT_HTTPS_PORT=443
 
 # When piped via curl|bash, stdin is consumed by the pipe.
 # Only read needs /dev/tty — echo/printf output works normally.
+prompt() {
+  local varname="$1" prompt_text="$2"
+  printf "%s" "$prompt_text"
+  read -r "$varname" </dev/tty 2>/dev/null || eval "$varname=''"
+}
 
 echo ""
 echo "  PortCraft Installer"
 echo "  ==================="
 echo ""
 
-# Check Docker
+# ── Check prerequisites ──────────────────────────────────────────────
+
 if ! command -v docker &>/dev/null; then
   echo "ERROR: Docker is not installed. Install Docker first:"
   echo "  https://docs.docker.com/engine/install/"
@@ -26,10 +34,59 @@ if ! docker compose version &>/dev/null; then
   exit 1
 fi
 
-# Install directory
-printf "Install directory [%s]: " "$DEFAULT_DIR"
-read -r INSTALL_DIR </dev/tty 2>/dev/null || INSTALL_DIR=""
+# ── Gather configuration ─────────────────────────────────────────────
+
+prompt INSTALL_DIR "Install directory [$DEFAULT_DIR]: "
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_DIR}"
+
+prompt HTTP_PORT "HTTP port [$DEFAULT_HTTP_PORT]: "
+HTTP_PORT="${HTTP_PORT:-$DEFAULT_HTTP_PORT}"
+
+prompt HTTPS_PORT "HTTPS port [$DEFAULT_HTTPS_PORT]: "
+HTTPS_PORT="${HTTPS_PORT:-$DEFAULT_HTTPS_PORT}"
+
+prompt SERVER_HOST "Server hostname or IP (e.g. portcraft.example.com or 10.1.1.50) [localhost]: "
+SERVER_HOST="${SERVER_HOST:-localhost}"
+
+echo ""
+echo "  Summary"
+echo "  -------"
+echo "  Install directory : $INSTALL_DIR"
+echo "  HTTP port         : $HTTP_PORT"
+echo "  HTTPS port        : $HTTPS_PORT"
+echo "  Server host       : $SERVER_HOST"
+echo ""
+
+prompt CONFIRM "Proceed with installation? [Y/n]: "
+CONFIRM="${CONFIRM:-Y}"
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "Installation cancelled."
+  exit 0
+fi
+
+# ── Build CORS origins list ──────────────────────────────────────────
+
+ALLOWED_ORIGINS="http://$SERVER_HOST"
+if [ "$HTTP_PORT" != "80" ]; then
+  ALLOWED_ORIGINS="http://$SERVER_HOST:$HTTP_PORT"
+fi
+
+# Add HTTPS origin
+if [ "$HTTPS_PORT" = "443" ]; then
+  ALLOWED_ORIGINS="$ALLOWED_ORIGINS,https://$SERVER_HOST"
+else
+  ALLOWED_ORIGINS="$ALLOWED_ORIGINS,https://$SERVER_HOST:$HTTPS_PORT"
+fi
+
+# Always include localhost for local access
+if [ "$SERVER_HOST" != "localhost" ]; then
+  ALLOWED_ORIGINS="$ALLOWED_ORIGINS,http://localhost"
+  if [ "$HTTP_PORT" != "80" ]; then
+    ALLOWED_ORIGINS="$ALLOWED_ORIGINS,http://localhost:$HTTP_PORT"
+  fi
+fi
+
+# ── Set up install directory ─────────────────────────────────────────
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
@@ -38,7 +95,8 @@ mkdir -p certs
 echo "Downloading docker-compose.yml..."
 curl -fsSL "$RELEASES_REPO/docker-compose.yml" -o docker-compose.yml
 
-# Generate .env if it doesn't exist
+# ── Generate .env ────────────────────────────────────────────────────
+
 if [ ! -f .env ]; then
   echo "Generating .env with random secrets..."
   POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
@@ -50,13 +108,26 @@ POSTGRES_USER=portcraft
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=portcraft
 SECRET_KEY=$SECRET_KEY
-HTTP_PORT=80
+HTTP_PORT=$HTTP_PORT
+HTTPS_PORT=$HTTPS_PORT
+ALLOWED_ORIGINS=$ALLOWED_ORIGINS
 ENVEOF
 
-  echo ".env created with random secrets."
+  echo ".env created."
 else
-  echo ".env already exists — keeping existing configuration."
+  echo ".env already exists — updating ports and CORS..."
+  # Update port and CORS settings in existing .env
+  sed -i "s|^HTTP_PORT=.*|HTTP_PORT=$HTTP_PORT|" .env
+  sed -i "s|^HTTPS_PORT=.*|HTTPS_PORT=$HTTPS_PORT|" .env
+  if grep -q "^ALLOWED_ORIGINS=" .env; then
+    sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$ALLOWED_ORIGINS|" .env
+  else
+    echo "ALLOWED_ORIGINS=$ALLOWED_ORIGINS" >> .env
+  fi
+  echo ".env updated."
 fi
+
+# ── Pull and start ───────────────────────────────────────────────────
 
 echo "Pulling Docker images..."
 docker compose pull
@@ -64,11 +135,17 @@ docker compose pull
 echo "Starting PortCraft..."
 docker compose up -d
 
+# ── Done ─────────────────────────────────────────────────────────────
+
 echo ""
 echo "PortCraft is running!"
-echo "  Open http://localhost in your browser to complete setup."
+if [ "$HTTP_PORT" = "80" ]; then
+  echo "  Open http://$SERVER_HOST in your browser to complete setup."
+else
+  echo "  Open http://$SERVER_HOST:$HTTP_PORT in your browser to complete setup."
+fi
 echo ""
-echo "  Install directory: $INSTALL_DIR"
-echo "  To stop:   cd $INSTALL_DIR && docker compose down"
-echo "  To update: cd $INSTALL_DIR && docker compose pull && docker compose up -d"
+echo "  Install directory : $INSTALL_DIR"
+echo "  To stop           : cd $INSTALL_DIR && docker compose down"
+echo "  To update         : cd $INSTALL_DIR && docker compose pull && docker compose up -d"
 echo ""
