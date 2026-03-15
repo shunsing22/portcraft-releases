@@ -15,13 +15,6 @@ prompt() {
   read -r "$varname" </dev/tty 2>/dev/null || eval "$varname=''"
 }
 
-prompt_secret() {
-  local varname="$1" prompt_text="$2"
-  printf "%s" "$prompt_text"
-  read -rs "$varname" </dev/tty 2>/dev/null || eval "$varname=''"
-  echo ""
-}
-
 echo ""
 echo "  PortCraft Installer"
 echo "  ==================="
@@ -57,38 +50,6 @@ HTTPS_PORT="${HTTPS_PORT:-$DEFAULT_HTTPS_PORT}"
 prompt SERVER_HOST "  Server hostname or IP (e.g. portcraft.example.com) [localhost]: "
 SERVER_HOST="${SERVER_HOST:-localhost}"
 
-# ── Gather admin account ─────────────────────────────────────────────
-
-echo ""
-echo "  Administrator Account"
-echo "  ---------------------"
-
-prompt ADMIN_USER "  Admin username: "
-while [ -z "$ADMIN_USER" ]; do
-  echo "  Username is required."
-  prompt ADMIN_USER "  Admin username: "
-done
-
-prompt ADMIN_EMAIL "  Admin email: "
-while [ -z "$ADMIN_EMAIL" ]; do
-  echo "  Email is required."
-  prompt ADMIN_EMAIL "  Admin email: "
-done
-
-while true; do
-  prompt_secret ADMIN_PASS "  Admin password (min 8 chars): "
-  if [ ${#ADMIN_PASS} -lt 8 ]; then
-    echo "  Password must be at least 8 characters."
-    continue
-  fi
-  prompt_secret ADMIN_PASS2 "  Confirm password: "
-  if [ "$ADMIN_PASS" != "$ADMIN_PASS2" ]; then
-    echo "  Passwords do not match."
-    continue
-  fi
-  break
-done
-
 # ── Confirmation ─────────────────────────────────────────────────────
 
 echo ""
@@ -98,8 +59,6 @@ echo "  Install directory : $INSTALL_DIR"
 echo "  HTTP port         : $HTTP_PORT"
 echo "  HTTPS port        : $HTTPS_PORT"
 echo "  Server host       : $SERVER_HOST"
-echo "  Admin user        : $ADMIN_USER"
-echo "  Admin email       : $ADMIN_EMAIL"
 echo ""
 
 prompt CONFIRM "  Proceed with installation? [Y/n]: "
@@ -181,65 +140,19 @@ docker compose pull
 echo "Starting PortCraft..."
 docker compose up -d
 
-# ── Wait for backend to be ready ─────────────────────────────────────
-
-API_URL="http://localhost:$HTTP_PORT/api"
-
-echo "Waiting for backend to be ready..."
-TRIES=0
-MAX_TRIES=60
-until curl -fsS "$API_URL/auth/status" >/dev/null 2>&1; do
-  TRIES=$((TRIES + 1))
-  if [ "$TRIES" -ge "$MAX_TRIES" ]; then
-    echo ""
-    echo "WARNING: Backend did not become ready after ${MAX_TRIES}s."
-    echo "  You can create the admin account in the browser at:"
-    if [ "$HTTP_PORT" = "80" ]; then
-      echo "  http://$SERVER_HOST"
-    else
-      echo "  http://$SERVER_HOST:$HTTP_PORT"
-    fi
-    echo ""
-    exit 0
-  fi
-  sleep 1
-done
-
-echo "Backend is ready."
-
-# ── Create admin account ─────────────────────────────────────────────
-
-echo "Creating administrator account..."
-HTTP_CODE=$(curl -s -o /tmp/portcraft_setup.json -w "%{http_code}" \
-  -X POST "$API_URL/auth/setup" \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"$ADMIN_USER\",\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "Admin account created successfully."
-elif [ "$HTTP_CODE" = "400" ]; then
-  echo "Admin account already exists — skipping."
-else
-  echo "WARNING: Failed to create admin account (HTTP $HTTP_CODE)."
-  echo "  You can create it in the browser at the setup page."
-fi
-
-# Clean up
-rm -f /tmp/portcraft_setup.json
-
 # ── Done ─────────────────────────────────────────────────────────────
 
 echo ""
 echo "  PortCraft is running!"
 if [ "$HTTP_PORT" = "80" ]; then
-  echo "  Open http://$SERVER_HOST in your browser."
+  echo "  Open http://$SERVER_HOST in your browser to complete setup."
 else
-  echo "  Open http://$SERVER_HOST:$HTTP_PORT in your browser."
+  echo "  Open http://$SERVER_HOST:$HTTP_PORT in your browser to complete setup."
 fi
 echo ""
-echo "  Install directory : $INSTALL_DIR"
-echo "  Admin user        : $ADMIN_USER"
+echo "  On first visit you will be prompted to create an administrator account."
 echo ""
-echo "  To stop   : cd $INSTALL_DIR && docker compose down"
-echo "  To update : cd $INSTALL_DIR && docker compose pull && docker compose up -d"
+echo "  Install directory : $INSTALL_DIR"
+echo "  To stop           : cd $INSTALL_DIR && docker compose down"
+echo "  To update         : cd $INSTALL_DIR && docker compose pull && docker compose up -d"
 echo ""
