@@ -4,13 +4,16 @@ $ErrorActionPreference = "Stop"
 $AppName = "portcraft"
 $ReleasesRepo = "https://raw.githubusercontent.com/shunsing22/portcraft-releases/main"
 $DefaultDir = "$env:USERPROFILE\portcraft"
+$DefaultHttpPort = "80"
+$DefaultHttpsPort = "443"
 
 Write-Host ""
 Write-Host "  PortCraft Installer" -ForegroundColor Cyan
 Write-Host "  ==================="
 Write-Host ""
 
-# Check Docker
+# ── Check prerequisites ──────────────────────────────────────────────
+
 try {
     docker --version | Out-Null
 } catch {
@@ -26,9 +29,67 @@ try {
     exit 1
 }
 
-# Install directory
-$InstallDir = Read-Host "Install directory [$DefaultDir]"
+# ── Gather configuration ─────────────────────────────────────────────
+
+Write-Host "  Server Configuration" -ForegroundColor Cyan
+Write-Host "  --------------------"
+
+$InstallDir = Read-Host "  Install directory [$DefaultDir]"
 if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = $DefaultDir }
+
+$HttpPort = Read-Host "  HTTP port [$DefaultHttpPort]"
+if ([string]::IsNullOrWhiteSpace($HttpPort)) { $HttpPort = $DefaultHttpPort }
+
+$HttpsPort = Read-Host "  HTTPS port [$DefaultHttpsPort]"
+if ([string]::IsNullOrWhiteSpace($HttpsPort)) { $HttpsPort = $DefaultHttpsPort }
+
+$ServerHost = Read-Host "  Server hostname or IP (e.g. portcraft.example.com) [localhost]"
+if ([string]::IsNullOrWhiteSpace($ServerHost)) { $ServerHost = "localhost" }
+
+# ── Confirmation ─────────────────────────────────────────────────────
+
+Write-Host ""
+Write-Host "  Summary" -ForegroundColor Cyan
+Write-Host "  -------"
+Write-Host "  Install directory : $InstallDir"
+Write-Host "  HTTP port         : $HttpPort"
+Write-Host "  HTTPS port        : $HttpsPort"
+Write-Host "  Server host       : $ServerHost"
+Write-Host ""
+
+$Confirm = Read-Host "  Proceed with installation? [Y/n]"
+if ([string]::IsNullOrWhiteSpace($Confirm)) { $Confirm = "Y" }
+if ($Confirm -notmatch '^[Yy]$') {
+    Write-Host "Installation cancelled."
+    exit 0
+}
+
+Write-Host ""
+
+# ── Build CORS origins list ──────────────────────────────────────────
+
+if ($HttpPort -eq "80") {
+    $AllowedOrigins = "http://$ServerHost"
+} else {
+    $AllowedOrigins = "http://${ServerHost}:$HttpPort"
+}
+
+# Add HTTPS origin
+if ($HttpsPort -eq "443") {
+    $AllowedOrigins = "$AllowedOrigins,https://$ServerHost"
+} else {
+    $AllowedOrigins = "$AllowedOrigins,https://${ServerHost}:$HttpsPort"
+}
+
+# Always include localhost for local access
+if ($ServerHost -ne "localhost") {
+    $AllowedOrigins = "$AllowedOrigins,http://localhost"
+    if ($HttpPort -ne "80") {
+        $AllowedOrigins = "$AllowedOrigins,http://localhost:$HttpPort"
+    }
+}
+
+# ── Set up install directory ─────────────────────────────────────────
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Set-Location $InstallDir
@@ -37,7 +98,8 @@ New-Item -ItemType Directory -Force -Path "certs" | Out-Null
 Write-Host "Downloading docker-compose.yml..."
 Invoke-WebRequest -Uri "$ReleasesRepo/docker-compose.yml" -OutFile "docker-compose.yml" -UseBasicParsing
 
-# Generate .env if it doesn't exist
+# ── Generate .env ────────────────────────────────────────────────────
+
 if (-not (Test-Path ".env")) {
     Write-Host "Generating .env with random secrets..."
 
@@ -57,13 +119,27 @@ POSTGRES_USER=portcraft
 POSTGRES_PASSWORD=$PostgresPassword
 POSTGRES_DB=portcraft
 SECRET_KEY=$SecretKey
-HTTP_PORT=80
+HTTP_PORT=$HttpPort
+HTTPS_PORT=$HttpsPort
+ALLOWED_ORIGINS=$AllowedOrigins
 "@ | Set-Content -Path ".env" -Encoding UTF8
 
-    Write-Host ".env created with random secrets."
+    Write-Host ".env created."
 } else {
-    Write-Host ".env already exists — keeping existing configuration."
+    Write-Host ".env already exists — updating ports and CORS..."
+    $envContent = Get-Content ".env" -Raw
+    $envContent = $envContent -replace '(?m)^HTTP_PORT=.*', "HTTP_PORT=$HttpPort"
+    $envContent = $envContent -replace '(?m)^HTTPS_PORT=.*', "HTTPS_PORT=$HttpsPort"
+    if ($envContent -match '(?m)^ALLOWED_ORIGINS=') {
+        $envContent = $envContent -replace '(?m)^ALLOWED_ORIGINS=.*', "ALLOWED_ORIGINS=$AllowedOrigins"
+    } else {
+        $envContent = $envContent.TrimEnd() + "`nALLOWED_ORIGINS=$AllowedOrigins`n"
+    }
+    $envContent | Set-Content -Path ".env" -Encoding UTF8
+    Write-Host ".env updated."
 }
+
+# ── Pull and start ───────────────────────────────────────────────────
 
 Write-Host "Pulling Docker images..."
 docker compose pull
@@ -71,11 +147,19 @@ docker compose pull
 Write-Host "Starting PortCraft..."
 docker compose up -d
 
+# ── Done ─────────────────────────────────────────────────────────────
+
 Write-Host ""
-Write-Host "PortCraft is running!" -ForegroundColor Green
-Write-Host "  Open http://localhost in your browser to complete setup."
+Write-Host "  PortCraft is running!" -ForegroundColor Green
+if ($HttpPort -eq "80") {
+    Write-Host "  Open http://$ServerHost in your browser to complete setup."
+} else {
+    Write-Host "  Open http://${ServerHost}:$HttpPort in your browser to complete setup."
+}
 Write-Host ""
-Write-Host "  Install directory: $InstallDir"
-Write-Host "  To stop:   cd $InstallDir; docker compose down"
-Write-Host "  To update: cd $InstallDir; docker compose pull; docker compose up -d"
+Write-Host "  On first visit you will be prompted to create an administrator account."
+Write-Host ""
+Write-Host "  Install directory : $InstallDir"
+Write-Host "  To stop           : cd $InstallDir; docker compose down"
+Write-Host "  To update         : cd $InstallDir; docker compose pull; docker compose up -d"
 Write-Host ""
